@@ -1,65 +1,106 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useRef } from "react";
+import { io, Socket } from "socket.io-client";
+
+const socket: Socket = io("http://localhost:5000");
 
 export default function Home() {
+  const localVideo = useRef<HTMLVideoElement | null>(null);
+  const remoteVideo = useRef<HTMLVideoElement | null>(null);
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
+
+  useEffect(() => {
+    startVideo();
+  }, []);
+
+  const startVideo = async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+
+    if (localVideo.current) {
+      localVideo.current.srcObject = stream;
+    }
+
+    peerConnection.current = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
+    stream.getTracks().forEach((track) => {
+      peerConnection.current?.addTrack(track, stream);
+    });
+
+    peerConnection.current.ontrack = (event) => {
+      if (remoteVideo.current) {
+        remoteVideo.current.srcObject = event.streams[0];
+      }
+    };
+
+    peerConnection.current.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("ice-candidate", {
+          candidate: event.candidate,
+          to: "other-user-id"
+        });
+      }
+    };
+  };
+
+  const callUser = async () => {
+    if (!peerConnection.current) return;
+
+    const offer = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offer);
+
+    socket.emit("offer", {
+      offer,
+      to: "other-user-id"
+    });
+  };
+
+  useEffect(() => {
+    socket.on("offer", async (data: any) => {
+      await peerConnection.current?.setRemoteDescription(data.offer);
+
+      const answer = await peerConnection.current?.createAnswer();
+      if (!answer) return;
+
+      await peerConnection.current?.setLocalDescription(answer);
+
+      socket.emit("answer", {
+        answer,
+        to: data.from
+      });
+    });
+
+    socket.on("answer", async (data: any) => {
+      await peerConnection.current?.setRemoteDescription(data.answer);
+    });
+
+    socket.on("ice-candidate", async (data: any) => {
+      await peerConnection.current?.addIceCandidate(data.candidate);
+    });
+
+    return () => {
+      socket.off("offer");
+      socket.off("answer");
+      socket.off("ice-candidate");
+    };
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="flex flex-col items-center gap-4 p-10">
+      <video ref={localVideo} autoPlay muted className="w-64" />
+      <video ref={remoteVideo} autoPlay className="w-64" />
+
+      <button
+        onClick={callUser}
+        className="bg-blue-500 text-white px-4 py-2 rounded"
+      >
+        Start Call
+      </button>
     </div>
   );
 }
