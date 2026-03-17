@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 
-const socket: Socket = io("http://localhost:5000");
+const socket: Socket = io("https://video-backend-l6u6.onrender.com");
 
 export default function Home() {
   const localVideo = useRef<HTMLVideoElement | null>(null);
